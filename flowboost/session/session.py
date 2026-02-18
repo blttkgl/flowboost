@@ -513,23 +513,14 @@ class Session:
         new_cases: list[Case] = []
 
         for case_i, suggestion_dict in enumerate(suggestions):
-            # Build parameter string from suggestions with underscores
-            param_parts = []
-            for dim, value in suggestion_dict.items():
-                if isinstance(value, float):
-                    param_parts.extend([dim.name, f"{value:.3f}"])
-                else:
-                    param_parts.extend([dim.name, str(value)])
-
-            param_str = "_".join(param_parts)
-
-            # Format: job_00050_angleOfAttack_30.919_8470316a
+            # Format: job_00050_250_8470316a
             uid = unique_id()
-            name = f"job_{job_number:05d}_{param_str}_{uid}"
+            name = f"job_{job_number:05d}_{uid}"
 
             # Clone template case
             case = self._template_case.clone(
-                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files
+                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files,
+                method=self.clone_method
             )
 
             case.id = uid
