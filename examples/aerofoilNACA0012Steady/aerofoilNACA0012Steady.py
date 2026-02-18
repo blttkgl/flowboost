@@ -51,7 +51,8 @@ if __name__ == "__main__":
     session = Session(
         name="aerofoilNACA0012Steady",
         data_dir=data_dir,
-        clone_method="copy"
+        clone_method="copy",
+        max_evaluations=50
     )
 
     case_dir = Path(data_dir, "templateCase")
