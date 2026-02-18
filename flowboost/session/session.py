@@ -200,6 +200,10 @@ class Session:
                 self.job_manager.move_data_for_job(job=job, dest=case_dest)
                 Case(case_dest).post_evaluation_update(job.to_dict())
 
+            # Display top designs after processing finished cases
+            if finished:
+                self.print_top_designs(n=5)
+
             logging.info("Entering optimizer loop")
             new_cases = self.loop_optimizer_once(num_new_cases=free_slots)
 
@@ -463,7 +467,6 @@ class Session:
             )
 
         logging.info(f"Session restored from {from_file}")
-
     def _process_optimizer_suggestion(
         self, suggestions: list[dict[Dimension, Any]]
     ) -> list[Case]:
@@ -491,13 +494,23 @@ class Session:
         new_cases: list[Case] = []
 
         for case_i, suggestion_dict in enumerate(suggestions):
-            # Prefix format is `stage_001_01`
+            # Build parameter string from suggestions with underscores
+            param_parts = []
+            for dim, value in suggestion_dict.items():
+                if isinstance(value, float):
+                    param_parts.extend([dim.name, f"{value:.3f}"])
+                else:
+                    param_parts.extend([dim.name, str(value)])
+
+            param_str = "_".join(param_parts)
+
+            # Format: stage_001_angleOfAttack_30.919_8470316a
             uid = unique_id()
-            name = f"stage{stage_prefix:03d}.{case_i+1:02d}_{uid}"
+            name = f"stage_{stage_prefix:03d}_{param_str}_{uid}"
 
             # Clone template case
             case = self._template_case.clone(
-                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files, method=self.clone_method
+                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files
             )
 
             case.id = uid
@@ -660,3 +673,73 @@ class Session:
         print(f"=== New cases ({len(cases)}) ===")
         for i, case in enumerate(cases, 1):
             print(f"[{i}] {str(case)}")
+
+    def print_top_designs(self, n: int = 5, by_objective: Optional[str] = None):
+        """
+        Display the top N designs based on objective function values.
+
+        Args:
+            n (int): Number of top designs to display. Defaults to 5.
+            by_objective (Optional[str]): Name of objective to rank by. If None, \
+                uses the first objective. Defaults to None.
+        """
+        # Get finished and successful cases
+        finished_cases = self.get_finished_cases(include_failed=False, batch_process=False)
+
+        if not finished_cases:
+            print("No completed cases available yet.")
+            return
+
+        if not self.backend.objectives:
+            print("No objectives configured.")
+            return
+
+        # Determine which objective to use for ranking
+        if by_objective:
+            objective = next((obj for obj in self.backend.objectives if obj.name == by_objective), None)
+            if not objective:
+                raise ValueError(f"Objective '{by_objective}' not found")
+        else:
+            objective = self.backend.objectives[0]
+
+        # Extract objective values for all cases from metadata
+        case_scores = []
+        for case in finished_cases:
+            metadata = case.read_metadata()
+            if not metadata:
+                continue
+
+            obj_outputs = metadata.get("objective-outputs", {})
+            if objective.name in obj_outputs:
+                value = obj_outputs[objective.name].get("value")
+                if value is not None:
+                    case_scores.append((case, value))
+
+        if not case_scores:
+            print(f"No valid objective values found for '{objective.name}'")
+            return
+
+        # Sort by objective value (reverse if maximizing)
+        reverse = not objective.minimize  # Higher is better if maximizing
+        case_scores.sort(key=lambda x: x[1], reverse=reverse)
+
+        # Display top N
+        top_n = case_scores[:min(n, len(case_scores))]
+
+        print(f"\n=== Top {len(top_n)} Designs (by '{objective.name}') ===")
+        print(f"{'Rank':<6} {'Case Name':<35} {objective.name:<15} {'Parameters'}")
+        print("-" * 100)
+
+        for rank, (case, value) in enumerate(top_n, 1):
+            # Get parameter values from metadata
+            params = []
+            metadata = case.read_metadata()
+            if metadata and "optimizer-suggestion" in metadata:
+                opt_sugg = metadata["optimizer-suggestion"]
+                params = [f"{k}={v.get('value', 'N/A'):.3f}" for k, v in opt_sugg.items()]
+
+            params_str = ", ".join(params) if params else "N/A"
+            print(f"{rank:<6} {case.name:<35} {value:<15.6f} {params_str}")
+
+        print()
+
