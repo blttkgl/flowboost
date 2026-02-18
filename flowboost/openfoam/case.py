@@ -148,6 +148,47 @@ class Case:
         new._based_on_case = self.path
         return new
 
+    @staticmethod
+    def copy(
+        source: Path | str,
+        destination: Path | str,
+    ) -> "Case":
+        """
+        Recursively copy a case directory to a new location using shutil.copytree.
+
+        This is a simpler alternative to clone() that performs a full recursive copy
+        without any selective filtering. The destination directory must not exist.
+
+        Args:
+            source (Path | str): Source case directory to copy from
+            destination (Path | str): Destination path for the new case. Must not exist.
+
+        Returns:
+            Case: Object representing the newly copied case
+
+        Raises:
+            FileExistsError: If destination already exists
+            FileNotFoundError: If source does not exist
+        """
+        import shutil
+
+        source_path = Path(source).resolve().absolute()
+        dest_path = Path(destination).resolve().absolute()
+
+        if not source_path.exists():
+            raise FileNotFoundError(f"Source case directory does not exist: {source_path}")
+
+        if dest_path.exists():
+            raise FileExistsError(f"Destination directory already exists: {dest_path}")
+
+        # Recursively copy the entire directory
+        shutil.copytree(source_path, dest_path)
+
+        # Create and return Case object for the new copy
+        new_case = Case(path=dest_path)
+        new_case._based_on_case = source_path
+        return new_case
+
     def foam_get(self, file: str, target: str = "system"):
         """Run foamGet in the case directory, adding the requested file from
         etc/caseDicts to target directory (defaulting to system).
