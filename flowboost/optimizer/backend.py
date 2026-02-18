@@ -234,6 +234,26 @@ class Backend(ABC):
             )
             final_outputs.append(post_processed_outputs)
 
+        # Step 4: Save the final objective outputs to case metadata
+        for case_idx, case in enumerate(successful_cases):
+            objective_results = {}
+            for obj_idx, objective in enumerate(self.objectives):
+                # Convert numpy types to Python native types for TOML compatibility
+                value = final_outputs[obj_idx][case_idx]
+                if hasattr(value, 'item'):  # numpy scalar
+                    value = value.item()
+                elif hasattr(value, 'tolist'):  # numpy array
+                    value = value.tolist()
+
+                objective_results[objective.name] = {
+                    "value": float(value),  # Ensure it's a Python float
+                    "minimize": objective.minimize,
+                }
+
+            # Save to metadata under "objective-outputs" section
+            case.update_metadata(objective_results, entry_header="objective-outputs")
+            logging.debug(f"Saved objective outputs to metadata for {case.name}")
+
         return final_outputs
 
     def _objective_name_to_objective(
