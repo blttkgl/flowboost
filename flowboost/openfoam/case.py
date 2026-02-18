@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from hashlib import blake2b
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, Literal
 from uuid import uuid4
 
 import tomlkit
@@ -85,6 +85,7 @@ class Case:
     def clone(
         self,
         clone_to: Path | str,
+        method: Literal["foamCloneCase", "copy"] = "foamCloneCase",
         add: Optional[list[str]] = None,
         latest_time: bool = False,
         no_scripts: bool = False,
@@ -98,40 +99,50 @@ class Case:
 
         Args:
             clone_to (Path | str): Destination case directory. Will be created.
+            method (Literal["foamCloneCase", "copy"]): Method to use for cloning. \
+                "foamCloneCase" uses OpenFOAM's utility (selective copy), \
+                "copy" does a full recursive copy. Defaults to "foamCloneCase".
             add (Optional[list[str]]): Copy 1 or more additional files/directories \
-                from source case
-            latest_time (bool, optional): Clone the latest time directory. Defaults to \
-                False.
-            no_scripts (bool, optional): Do not copy shell scripts. Defaults to False.
-            processor (bool, optional): Copy *processor dirs of a decomposed case. \
-                Defaults to False.
-            start_from (Optional[str], optional): Set the starting time directory name.\
-                Defaults to None.
+                from source case (only used with foamCloneCase method)
+            latest_time (bool, optional): Clone the latest time directory (only used \
+                with foamCloneCase). Defaults to False.
+            no_scripts (bool, optional): Do not copy shell scripts (only used with \
+                foamCloneCase). Defaults to False.
+            processor (bool, optional): Copy *processor dirs of a decomposed case \
+                (only used with foamCloneCase). Defaults to False.
+            start_from (Optional[str], optional): Set the starting time directory name \
+                (only used with foamCloneCase). Defaults to None.
 
         Returns:
             Case: Object representing the new case
         """
-        assert FOAM.in_env()
-
         new_case_path = Path(clone_to)
         if new_case_path.exists():
             raise FileExistsError(f"Case directory already exists: '{new_case_path}'")
 
-        cmd = ["foamCloneCase", self.path, new_case_path]
+        if method == "copy":
+            # Direct copy using cp -r
+            cmd = ["cp", "-r", str(self.path), str(new_case_path)]
+            run_command(cmd)
+        elif method == "foamCloneCase":
+            assert FOAM.in_env()
+            cmd = ["foamCloneCase", self.path, new_case_path]
 
-        # Handle optional arguments
-        if add:
-            cmd.extend(["-add"] + add)
-        if latest_time:
-            cmd.append("-latestTime")
-        if no_scripts:
-            cmd.append("-no-scripts")
-        if processor:
-            cmd.append("-processor")
-        if start_from:
-            cmd.extend(["-startFrom", start_from])
+            # Handle optional arguments
+            if add:
+                cmd.extend(["-add"] + add)
+            if latest_time:
+                cmd.append("-latestTime")
+            if no_scripts:
+                cmd.append("-no-scripts")
+            if processor:
+                cmd.append("-processor")
+            if start_from:
+                cmd.extend(["-startFrom", start_from])
 
-        run_command(cmd)
+            run_command(cmd)
+        else:
+            raise ValueError(f"Unknown clone method: '{method}'")
 
         new = Case(path=new_case_path)
         new._based_on_case = self.path
@@ -151,7 +162,11 @@ class Case:
         print(f"Loaded '{file}' into {self.path.name}/{target}")
 
     @staticmethod
-    def from_tutorial(tutorial: str, new_case_dir: Path | str) -> "Case":
+    def from_tutorial(
+        tutorial: str,
+        new_case_dir: Path | str,
+        method: Literal["foamCloneCase", "copy"] = "foamCloneCase",
+    ) -> "Case":
         """
         Clones a new Case directory from an existing OpenFOAM tutorial.
         If new_case_dir exists, the clone will be skipped.
@@ -164,6 +179,9 @@ class Case:
                 Example: "multicomponentFluid/aachenBomb".
             new_case_dir (Path | str): Path for the new case directory that \
                 will be created. E.g. `my/path/aachenBomb_tutorial`.
+            method (Literal["foamCloneCase", "copy"]): Method to use for cloning. \
+                "foamCloneCase" uses OpenFOAM's utility (selective copy), \
+                "copy" does a full recursive copy. Defaults to "foamCloneCase".
         """
         # Get path
         tutorial_path = FOAM.tutorial(relative_path=tutorial)
@@ -175,8 +193,15 @@ class Case:
             )
             return Case(path=new_case_dir)
 
-        cmd = ["foamCloneCase", tutorial_path, new_case_dir]
-        run_command(cmd)
+        if method == "copy":
+            # Direct copy using cp -r
+            cmd = ["cp", "-r", str(tutorial_path), str(new_case_dir)]
+            run_command(cmd)
+        elif method == "foamCloneCase":
+            cmd = ["foamCloneCase", tutorial_path, new_case_dir]
+            run_command(cmd)
+        else:
+            raise ValueError(f"Unknown clone method: '{method}'")
 
         new_case = Case(path=new_case_dir)
         new_case._based_on_case = tutorial_path
@@ -290,7 +315,21 @@ class Case:
             dict[str, Any]: Parametrized configuration keyed by dimension names
         """
         par_dict = {}
+
+        # Try to read from metadata first (for completed cases)
+        metadata = self.read_metadata()
+        optimizer_suggestions = metadata.get("optimizer-suggestion", {}) if metadata else {}
+
         for dim in dimensions:
+            # First try to get from saved optimizer-suggestion metadata
+            if dim.name in optimizer_suggestions:
+                value = optimizer_suggestions[dim.name].get("value")
+                if value is not None:
+                    par_dict[dim.name] = value
+                    logging.debug(f"Read dim='{dim.name}' from metadata: {value}")
+                    continue
+
+            # Otherwise, read from dictionary
             if dim.linked_entry is None:
                 raise ValueError(
                     f"Cannot parametrize case: '{dim.name}' has no linked dict entry"
@@ -537,14 +576,39 @@ class Case:
         )
         return False
 
+    def check_success_criteria(self) -> bool:
+        """
+        Check if case meets success criteria. Override this method or provide
+        custom success check functions for more sophisticated criteria.
+
+        Default: Case is successful if it finished running.
+
+        Returns:
+            bool: True if case is successful
+        """
+        # Basic criterion: case finished
+        if self.status != Status.FINISHED:
+            return False
+
+        # TODO: Add user-defined criteria, e.g.:
+        # - Check if solver converged
+        # - Verify residuals are below threshold
+        # - Ensure simulation reached endTime
+        # - Validate that required output files exist
+
+        return True
+
     def post_evaluation_update(self, serialized_job: dict):
         # Mark as finished
         self.status = Status("finished")
 
-        # TODO Infer success
-        logging.warning(
-            "Case finished, but not running user-defined success status functions (TODO)"
-        )
+        # Check success criteria
+        self.success = self.check_success_criteria()
+
+        if self.success:
+            logging.info(f"Case {self.name} marked as successful")
+        else:
+            logging.warning(f"Case {self.name} marked as failed")
 
         # Update metadata on disk
         self.persist_to_file()
