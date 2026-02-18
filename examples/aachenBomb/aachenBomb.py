@@ -46,11 +46,24 @@ if __name__ == "__main__":
     data_dir = Path("flowboost_data")
 
     # FlowBoost session
-    session = Session(name="aachenBomb", data_dir=data_dir)
+    # Use clone_method="copy" to ensure all files are copied when generating new cases
+    session = Session(name="aachenBomb", data_dir=data_dir, clone_method="copy")
+
+    # Define a template case
 
     # Define a template case
     case_dir = Path(data_dir, "aachenBomb_template")
-    aachen_case = Case.from_tutorial("multicomponentFluid/aachenBomb", case_dir)
+    aachen_case = Case.copy(Path("aachenBomb"), case_dir)
+
+    decomp_dict = aachen_case.dictionary("system/decomposeParDict")
+
+    # Use method="copy" to ensure all files (including speciesThermo) are copied
+    aachen_case = Case(case_dir)
+
+    # Change the decomposition method
+    decomp_dict = aachen_case.dictionary("system/decomposeParDict")
+    decomp_dict.entry("numberOfSubdomains").set(4)
+    decomp_dict.entry("decomposer").set("scotch")
 
     session.attach_template_case(case=aachen_case)
 
@@ -72,7 +85,7 @@ if __name__ == "__main__":
     # produced by the objective.
     objective = Objective(
         name="Peak temperature",
-        minimize=True,
+        minimize=False,
         objective_function=max_temp_objective,
         normalization_step="yeo-johnson",
     )
@@ -99,22 +112,24 @@ if __name__ == "__main__":
     # Next, define the search space dimension for tolerance and link it to
     # the configuration dictionary.
     mass_dim = Dimension.range(
-        name="Injected mass", link=entry_link, lower=1e-7, upper=1e-4, log_scale=False
+        name="Injected_mass", link=entry_link, lower=1e-7, upper=1e-4, log_scale=False
     )
 
     # Dictionary link for entry to modify
-    dict_file = "constant/cloudProperties"
-    entry_path = "subModels/injectionModels/model1/SOI"
+    dict_file = "0/T"
+    entry_path = "initialTemperature"
     entry_link = Dictionary.link(dict_file).entry(entry_path)
 
     # Next, define the search space dimension for tolerance and link it to
     # the configuration dictionary.
-    soi_dim = Dimension.range(
-        name="SOI", link=entry_link, lower=0.0, upper=1e-3, log_scale=False
-    )
 
+    T_dim = Dimension.choice(
+        name="initialTemperature",
+        link=entry_link,
+        choices=[700, 800, 900]
+    )
     # Remember to add the dimension(s) to your Session
-    session.backend.set_search_space([mass_dim, soi_dim])
+    session.backend.set_search_space([mass_dim, T_dim])
 
     # Finally, if you are working in an HPC enviroment, with a job manager such
     # as Slurm or Sun Grid Engine (SGE), you can define a JobManager to
