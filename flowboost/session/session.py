@@ -27,6 +27,9 @@ class Session:
         dataframe_format: str = "polars",
         backend: str = "AxBackend",
         clone_method: Literal["foamCloneCase", "copy"] = "foamCloneCase",
+        max_evaluations: Optional[int] = None,
+        target_value: Optional[float] = None,
+        target_objective: Optional[str] = None,
     ):
         """
         Initialize an optimization session.
@@ -42,6 +45,12 @@ class Session:
                 basis. Defaults to polars.
             backend (str, optional): Optimization backend to use. Defaults to "Ax".
             clone_method (Literal["foamCloneCase", "copy"], optional): Method to use for cloning cases. Defaults to "foamCloneCase".
+            max_evaluations (Optional[int], optional): Maximum number of evaluations \
+                before stopping optimization. Defaults to None (no limit).
+            target_value (Optional[float], optional): Target objective value to reach. \
+                Optimization stops when this value is achieved. Defaults to None.
+            target_objective (Optional[str], optional): Name of objective to check \
+                against target_value. If None, uses first objective. Defaults to None.
         """
         self.name: str = name
         self.data_dir: Path = Path(data_dir)
@@ -50,6 +59,11 @@ class Session:
         self.created_at: datetime = datetime.now(tz=timezone.utc)
         self.dataframe_format: str = dataframe_format
         self.clone_method: Literal["foamCloneCase", "copy"] = clone_method
+
+        # Termination criteria
+        self.max_evaluations: Optional[int] = max_evaluations
+        self.target_value: Optional[float] = target_value
+        self.target_objective: Optional[str] = target_objective
 
         if archival_dir:
             if archival_dir == self.data_dir:
@@ -185,7 +199,6 @@ class Session:
         if not self.job_manager:
             raise ValueError("Cannot run persistent optimization without a job manager")
 
-        # THIS IS THE INFINITE LOOP - only exits via sys.exit() in handle_finished_acquisition_job
         while True:
             free_slots, finished, was_acq_job = self.job_manager.do_monitoring()
             logging.info(f"Manager returned slots={free_slots}, finished={finished}")
@@ -200,16 +213,22 @@ class Session:
                 self.job_manager.move_data_for_job(job=job, dest=case_dest)
                 Case(case_dest).post_evaluation_update(job.to_dict())
 
-            # Display top designs after processing finished cases
-            if finished:
-                self.print_top_designs(n=5)
+            # Check termination criteria after processing finished cases
+            if self._check_termination_criteria():
+                logging.info("Termination criteria met - stopping optimization")
+                logging.info("Optimization complete!")
+                return
 
             logging.info("Entering optimizer loop")
             new_cases = self.loop_optimizer_once(num_new_cases=free_slots)
 
             for case in new_cases:
-                # TODO pass script args automatically
+                # TODO pass script args
                 self.job_manager.submit_case(case)
+
+            # Print top designs after submitting new cases
+            if new_cases:
+                self.print_top_designs(n=5)
 
     def loop_optimizer_once(self, num_new_cases: int) -> list[Case]:
         if self.backend.offload_acquisition:
@@ -488,8 +507,8 @@ class Session:
         if self._template_case is None:
             raise ValueError("Template case is None: cannot generate cases")
 
-        # Get prefix for this batch
-        stage_prefix = self._get_next_stage_prefix()
+        # Get next job number (sequential counter of all cases ever submitted)
+        job_number = self._get_next_job_number()
 
         new_cases: list[Case] = []
 
@@ -504,9 +523,9 @@ class Session:
 
             param_str = "_".join(param_parts)
 
-            # Format: stage_001_angleOfAttack_30.919_8470316a
+            # Format: job_00050_angleOfAttack_30.919_8470316a
             uid = unique_id()
-            name = f"stage_{stage_prefix:03d}_{param_str}_{uid}"
+            name = f"job_{job_number:05d}_{param_str}_{uid}"
 
             # Clone template case
             case = self._template_case.clone(
@@ -514,7 +533,7 @@ class Session:
             )
 
             case.id = uid
-            case._generation_index = f"{stage_prefix:03d}.{case_i+1:02d}"
+            case._generation_index = f"{job_number:05d}.{case_i+1:02d}"
 
             # Apply all suggestions
             self._apply_suggestions_to_case(case, suggestion_dict)
@@ -528,6 +547,7 @@ class Session:
             case.update_metadata(suggestion_metadata, header)
 
             new_cases.append(case)
+            job_number += 1
 
         # Persist session
         self.persist()
@@ -571,20 +591,32 @@ class Session:
 
         return ser_dict
 
-    def _get_next_stage_prefix(self) -> int:
-        # Returns next stage index
+    def _get_next_job_number(self) -> int:
+        """
+        Returns the next sequential job number based on all cases ever created.
+        This is a simple counter of total case submissions.
+        """
         cases = self.get_all_cases(include_failed=True)
 
         if not cases:
             return 1
 
-        # Separate names by '.' and remove the "stage" prefix
-        names = [c.name.split(".")[0].replace("stage", "") for c in cases]
+        # Extract job numbers from case names
+        job_numbers = []
+        for case in cases:
+            # Case names are like: job_00050_angleOfAttack_30.919_8470316a
+            parts = case.name.split("_")
+            if parts[0] == "job" and len(parts) > 1:
+                try:
+                    job_num = int(parts[1])
+                    job_numbers.append(job_num)
+                except ValueError:
+                    continue
 
-        # Process to ints
-        int_names = [int(name) for name in names if name.isdigit()]
+        if not job_numbers:
+            return 1
 
-        return max(int_names) + 1
+        return max(job_numbers) + 1
 
     def _ensure_dirs(self):
         if not self.data_dir.exists():
@@ -667,6 +699,70 @@ class Session:
 
         if self.archival_dir.exists():
             logging.warning(f"Not removing archival directory [{self.archival_dir}]")
+
+    def _check_termination_criteria(self) -> bool:
+        """
+        Check if any termination criteria have been met.
+
+        Returns:
+            bool: True if optimization should stop, False otherwise
+        """
+        finished_cases = self.get_finished_cases(include_failed=False)
+
+        # Criterion 1: Maximum number of evaluations
+        if self.max_evaluations is not None:
+            num_evaluations = len(finished_cases)
+            if num_evaluations >= self.max_evaluations:
+                logging.info(
+                    f"Reached maximum evaluations: {num_evaluations}/{self.max_evaluations}"
+                )
+                return True
+
+        # Criterion 2: Target value reached
+        if self.target_value is not None:
+            if not self.backend.objectives:
+                logging.warning("No objectives configured - cannot check target value")
+                return False
+
+            # Determine which objective to check
+            if self.target_objective:
+                objective = next(
+                    (obj for obj in self.backend.objectives
+                     if obj.name == self.target_objective),
+                    None
+                )
+                if not objective:
+                    logging.warning(
+                        f"Target objective '{self.target_objective}' not found"
+                    )
+                    return False
+            else:
+                objective = self.backend.objectives[0]
+
+            # Check if target has been reached
+            for case in finished_cases:
+                metadata = case.read_metadata()
+                if not metadata:
+                    continue
+
+                obj_outputs = metadata.get("objective-outputs", {})
+                if objective.name in obj_outputs:
+                    value = obj_outputs[objective.name].get("value")
+                    if value is not None:
+                        # Check if target is reached based on minimize/maximize
+                        if objective.minimize:
+                            target_reached = value <= self.target_value
+                        else:
+                            target_reached = value >= self.target_value
+
+                        if target_reached:
+                            logging.info(
+                                f"Target value reached! {objective.name}={value:.6f} "
+                                f"(target={self.target_value:.6f})"
+                            )
+                            return True
+
+        return False
 
     @staticmethod
     def _pretty_print_cases(cases: list[Case]):
