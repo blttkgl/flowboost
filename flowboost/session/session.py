@@ -5,7 +5,7 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Literal
 
 from flowboost.config import config
 from flowboost.manager.manager import JobV2, Manager
@@ -26,6 +26,7 @@ class Session:
         archival_dir: Optional[Path] = None,
         dataframe_format: str = "polars",
         backend: str = "AxBackend",
+        clone_method: Literal["foamCloneCase", "copy"] = "foamCloneCase",
     ):
         """
         Initialize an optimization session.
@@ -40,6 +41,7 @@ class Session:
                 default for case data access. Can be configured on a per-case \
                 basis. Defaults to polars.
             backend (str, optional): Optimization backend to use. Defaults to "Ax".
+            clone_method (Literal["foamCloneCase", "copy"], optional): Method to use for cloning cases. Defaults to "foamCloneCase".
         """
         self.name: str = name
         self.data_dir: Path = Path(data_dir)
@@ -47,6 +49,7 @@ class Session:
         self.archival_dir: Path = Path(data_dir, "cases_completed")
         self.created_at: datetime = datetime.now(tz=timezone.utc)
         self.dataframe_format: str = dataframe_format
+        self.clone_method: Literal["foamCloneCase", "copy"] = clone_method
 
         if archival_dir:
             if archival_dir == self.data_dir:
@@ -182,6 +185,7 @@ class Session:
         if not self.job_manager:
             raise ValueError("Cannot run persistent optimization without a job manager")
 
+        # THIS IS THE INFINITE LOOP - only exits via sys.exit() in handle_finished_acquisition_job
         while True:
             free_slots, finished, was_acq_job = self.job_manager.do_monitoring()
             logging.info(f"Manager returned slots={free_slots}, finished={finished}")
@@ -321,6 +325,7 @@ class Session:
         if data.get("optimizer", "") != self.backend.type:
             raise ValueError(f"Incorrect optimizer type in result JSON: {data}")
 
+        # THIS IS WHERE OPTIMIZATION COMPLETION IS CHECKED
         if data.get("status_finished", False) is True:
             logging.info("Backends reported optimization as finished: exiting")
             sys.exit("Optimization finished")
@@ -492,7 +497,7 @@ class Session:
 
             # Clone template case
             case = self._template_case.clone(
-                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files
+                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files, method=self.clone_method
             )
 
             case.id = uid
