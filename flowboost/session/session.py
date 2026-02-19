@@ -219,6 +219,7 @@ class Session:
             # Check termination criteria after processing finished cases
             if self._check_termination_criteria():
                 logging.info("Termination criteria met - stopping optimization")
+                self._write_designs_log()
                 logging.info("Optimization complete!")
                 return
 
@@ -226,11 +227,11 @@ class Session:
             new_cases = self.loop_optimizer_once(num_new_cases=free_slots)
 
             for case in new_cases:
-                # TODO pass script args
                 self.job_manager.submit_case(case)
 
-            # Print all designs in submission order after submitting new cases
+            # Write designs log and print all designs after submitting new cases
             if new_cases:
+                self._write_designs_log()
                 self.print_top_designs(n=None)
 
     def loop_optimizer_once(self, num_new_cases: int) -> list[Case]:
@@ -489,6 +490,7 @@ class Session:
             )
 
         logging.info(f"Session restored from {from_file}")
+
     def _process_optimizer_suggestion(
         self, suggestions: list[dict[Dimension, Any]]
     ) -> list[Case]:
@@ -802,13 +804,18 @@ class Session:
             if not metadata:
                 continue
 
-            obj_outputs = metadata.get("objective-outputs", {})
-            if objective.name in obj_outputs:
-                value = obj_outputs[objective.name].get("value")
-                if value is not None:
-                    # Get generation index for submission order
-                    gen_index = metadata.get("generation_index", "99999.99")
-                    case_scores.append((case, value, gen_index))
+            # Get raw value
+            raw_values = metadata.get("objective-values-raw", {})
+            raw_value = raw_values.get(objective.name)
+
+            if raw_value is not None:
+                # Get processed value for ranking (optimizer uses this)
+                obj_outputs = metadata.get("objective-outputs", {})
+                proc_value = obj_outputs.get(objective.name, {}).get("value", raw_value)
+
+                # Get generation index for submission order
+                gen_index = metadata.get("generation_index", "99999.99")
+                case_scores.append((case, proc_value, raw_value, gen_index))
 
         if not case_scores:
             print(f"No valid objective values found for '{objective.name}'")
@@ -816,21 +823,21 @@ class Session:
 
         if n is None:
             # Show all in submission order
-            case_scores.sort(key=lambda x: x[2])  # Sort by generation_index
+            case_scores.sort(key=lambda x: x[3])  # Sort by generation_index
             display_cases = case_scores
             header = f"=== All Designs in Submission Order (by '{objective.name}') ==="
         else:
-            # Sort by objective value (reverse if maximizing)
+            # Sort by processed value for proper ranking (reverse if maximizing)
             reverse = not objective.minimize  # Higher is better if maximizing
             case_scores.sort(key=lambda x: x[1], reverse=reverse)
             display_cases = case_scores[:min(n, len(case_scores))]
             header = f"=== Top {len(display_cases)} Designs (by '{objective.name}') ==="
 
         print(f"\n{header}")
-        print(f"{'Rank':<6} {'Case Name':<35} {objective.name:<15} {'Parameters'}")
+        print(f"{'Rank':<6} {'Case Name':<35} {objective.name:<18} {'Parameters'}")
         print("-" * 100)
 
-        for rank, (case, value, gen_index) in enumerate(display_cases, 1):
+        for rank, (case, proc_value, raw_value, gen_index) in enumerate(display_cases, 1):
             # Get parameter values from metadata
             params = []
             metadata = case.read_metadata()
@@ -839,7 +846,70 @@ class Session:
                 params = [f"{k}={v.get('value', 'N/A'):.3f}" for k, v in opt_sugg.items()]
 
             params_str = ", ".join(params) if params else "N/A"
-            print(f"{rank:<6} {case.name:<35} {value:<15.6f} {params_str}")
+            print(f"{rank:<6} {case.name:<35} {raw_value:<18.6f} {params_str}")
 
         print()
+
+    def _write_designs_log(self, fname: str = "designs.json"):
+        """
+        Writes a JSON file to the session data directory containing all
+        completed designs in chronological (submission) order, with their
+        parameters and raw objective values.
+
+        The file is overwritten on each call, always reflecting the full
+        current state.
+
+        Args:
+            fname (str): Output filename. Defaults to 'designs.json'.
+        """
+        finished_cases = self.get_finished_cases(include_failed=False, batch_process=False)
+
+        if not finished_cases:
+            return
+
+        designs = []
+
+        for case in finished_cases:
+            metadata = case.read_metadata()
+            if not metadata:
+                continue
+
+            # Parameters from optimizer suggestion
+            params = {}
+            if "optimizer-suggestion" in metadata:
+                for k, v in metadata["optimizer-suggestion"].items():
+                    params[k] = v.get("value")
+
+            # Raw objective values
+            objectives = {}
+            if "objective-outputs" in metadata:
+                for obj_name, obj_data in metadata["objective-outputs"].items():
+                    objectives[obj_name] = {
+                        "value": obj_data.get("value"),
+                        "minimize": obj_data.get("minimize"),
+                    }
+
+            designs.append({
+                "name": case.name,
+                "generation_index": metadata.get("generation_index"),
+                "created_at": str(metadata.get("created_at", "")),
+                "parameters": params,
+                "objectives": objectives,
+            })
+
+        # Sort chronologically by generation_index
+        designs.sort(key=lambda d: d["generation_index"] or "99999.99")
+
+        output = {
+            "session": self.name,
+            "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+            "num_designs": len(designs),
+            "designs": designs,
+        }
+
+        out_path = Path(self.data_dir, fname)
+        with open(out_path, "w") as f:
+            json.dump(output, f, indent=2)
+
+        logging.info(f"Designs log written to {out_path} ({len(designs)} designs)")
 
