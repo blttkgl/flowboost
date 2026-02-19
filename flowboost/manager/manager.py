@@ -289,6 +289,12 @@ class Manager(ABC):
             logging.warning(f"Job is still running, cannot move data ({str(job)})")
             return False
 
+        if not job.wdir.exists():
+            logging.error(
+                f"Source directory does not exist, cannot move: {job.wdir}"
+            )
+            return
+
         # Path(dest).mkdir(parents=True, exist_ok=True)
 
         try:

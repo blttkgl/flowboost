@@ -203,7 +203,6 @@ class Session:
             free_slots, finished, was_acq_job = self.job_manager.do_monitoring()
             logging.info(f"Manager returned slots={free_slots}, finished={finished}")
 
-            # Print top 5 designs after each monitoring cycle
             self.print_top_designs(n=5)
 
             if was_acq_job:
@@ -213,7 +212,15 @@ class Session:
             for job in finished:
                 logging.info(f"Moving data for finished job {job}")
                 case_dest = Path(self.archival_dir, job.wdir.name)
-                self.job_manager.move_data_for_job(job=job, dest=case_dest)
+                move_ok = self.job_manager.move_data_for_job(job=job, dest=case_dest)
+
+                if not move_ok or not case_dest.exists():
+                    logging.warning(
+                        f"Skipping post_evaluation_update for {job.wdir.name}: "
+                        f"move failed or destination missing"
+                    )
+                    continue
+
                 Case(case_dest).post_evaluation_update(job.to_dict())
 
             # Check termination criteria after processing finished cases
@@ -490,6 +497,21 @@ class Session:
             )
 
         logging.info(f"Session restored from {from_file}")
+        # No automatic pending case cleanup here.
+
+    def clean_pending_cases(self):
+        """
+        Explicitly removes all pending case directories.
+        Call this before session.start() if you want to discard any
+        leftover pending cases from a previous run and start fresh.
+        """
+        removed = 0
+        for p in filter(Path.is_dir, self.pending_dir.iterdir()):
+            if path_is_foam_dir(p):
+                shutil.rmtree(p)
+                removed += 1
+
+        logging.info(f"Cleaned {removed} pending case(s) from {self.pending_dir}")
 
     def _process_optimizer_suggestion(
         self, suggestions: list[dict[Dimension, Any]]

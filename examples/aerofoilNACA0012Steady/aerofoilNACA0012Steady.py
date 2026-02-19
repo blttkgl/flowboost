@@ -65,6 +65,9 @@ if __name__ == "__main__":
     control_dict = naca_case.dictionary("system/controlDict")
     control_dict.entry("writeInterval").set("5000")
 
+    U_dict = naca_case.dictionary("0/U")
+    U_dict.entry("speed").set("15")
+
     # Attach template case to session
     session.attach_template_case(case=naca_case)
 
@@ -87,21 +90,11 @@ if __name__ == "__main__":
     aoa_dim = Dimension.range(
         name="angleOfAttack",
         link=entry_link_aoa,
-        lower=10,
+        lower=-10,
         upper=30,
         log_scale=False
     )
-
-    # Velocity dimension
-    ENTRY_PATH_SPEED = "speed"
-    entry_link_speed = Dictionary.link(DICT_FILE).entry(ENTRY_PATH_SPEED)
-    speed_dim = Dimension.choice(
-        name="speed",
-        link=entry_link_speed,
-        choices=[200, 250, 300]
-    )
-
-    session.backend.set_search_space([aoa_dim, speed_dim])
+    session.backend.set_search_space([aoa_dim])
 
     # Configure job manager
     if not session.job_manager:
@@ -111,5 +104,6 @@ if __name__ == "__main__":
             job_limit=5
         )
 
-    session.job_manager.monitoring_interval = 60
+    session.job_manager.monitoring_interval = 10
+    session.clean_pending_cases()
     session.start()
