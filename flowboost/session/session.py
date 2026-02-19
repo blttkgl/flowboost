@@ -203,6 +203,9 @@ class Session:
             free_slots, finished, was_acq_job = self.job_manager.do_monitoring()
             logging.info(f"Manager returned slots={free_slots}, finished={finished}")
 
+            # Print top 5 designs after each monitoring cycle
+            self.print_top_designs(n=5)
+
             if was_acq_job:
                 self.handle_finished_acquisition_job(finished[0])
                 continue
@@ -226,9 +229,9 @@ class Session:
                 # TODO pass script args
                 self.job_manager.submit_case(case)
 
-            # Print top designs after submitting new cases
+            # Print all designs in submission order after submitting new cases
             if new_cases:
-                self.print_top_designs(n=5)
+                self.print_top_designs(n=None)
 
     def loop_optimizer_once(self, num_new_cases: int) -> list[Case]:
         if self.backend.offload_acquisition:
@@ -256,7 +259,7 @@ class Session:
         if finished_cases:
             # If any are finished, attach them
             logging.info("Running model update")
-            self.backend.tell(self.get_finished_cases(batch_process=True))
+            self.backend.tell(finished_cases)  # ← Use the already-processed cases
 
         # If there are pending cases, attach them
         self.backend.attach_pending_cases(self.get_pending_cases())
@@ -519,7 +522,8 @@ class Session:
 
             # Clone template case
             case = self._template_case.clone(
-                clone_to=Path(self.pending_dir, name), add=self._template_case_add_files,
+                clone_to=Path(self.pending_dir, name),
+                add=self._template_case_add_files,
                 method=self.clone_method
             )
 
@@ -761,12 +765,14 @@ class Session:
         for i, case in enumerate(cases, 1):
             print(f"[{i}] {str(case)}")
 
-    def print_top_designs(self, n: int = 5, by_objective: Optional[str] = None):
+    def print_top_designs(self, n: Optional[int] = 5, by_objective: Optional[str] = None):
         """
         Display the top N designs based on objective function values.
+        If n is None, displays all designs in submission order.
 
         Args:
-            n (int): Number of top designs to display. Defaults to 5.
+            n (Optional[int]): Number of top designs to display. If None, shows all \
+                in submission order. Defaults to 5.
             by_objective (Optional[str]): Name of objective to rank by. If None, \
                 uses the first objective. Defaults to None.
         """
@@ -800,24 +806,31 @@ class Session:
             if objective.name in obj_outputs:
                 value = obj_outputs[objective.name].get("value")
                 if value is not None:
-                    case_scores.append((case, value))
+                    # Get generation index for submission order
+                    gen_index = metadata.get("generation_index", "99999.99")
+                    case_scores.append((case, value, gen_index))
 
         if not case_scores:
             print(f"No valid objective values found for '{objective.name}'")
             return
 
-        # Sort by objective value (reverse if maximizing)
-        reverse = not objective.minimize  # Higher is better if maximizing
-        case_scores.sort(key=lambda x: x[1], reverse=reverse)
+        if n is None:
+            # Show all in submission order
+            case_scores.sort(key=lambda x: x[2])  # Sort by generation_index
+            display_cases = case_scores
+            header = f"=== All Designs in Submission Order (by '{objective.name}') ==="
+        else:
+            # Sort by objective value (reverse if maximizing)
+            reverse = not objective.minimize  # Higher is better if maximizing
+            case_scores.sort(key=lambda x: x[1], reverse=reverse)
+            display_cases = case_scores[:min(n, len(case_scores))]
+            header = f"=== Top {len(display_cases)} Designs (by '{objective.name}') ==="
 
-        # Display top N
-        top_n = case_scores[:min(n, len(case_scores))]
-
-        print(f"\n=== Top {len(top_n)} Designs (by '{objective.name}') ===")
+        print(f"\n{header}")
         print(f"{'Rank':<6} {'Case Name':<35} {objective.name:<15} {'Parameters'}")
         print("-" * 100)
 
-        for rank, (case, value) in enumerate(top_n, 1):
+        for rank, (case, value, gen_index) in enumerate(display_cases, 1):
             # Get parameter values from metadata
             params = []
             metadata = case.read_metadata()
