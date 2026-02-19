@@ -219,14 +219,17 @@ class Backend(ABC):
 
         if len(successful_cases_indices) == 0:
             return []
-
         # Step 3: Execute post-processing steps for only successful cases
         final_outputs = []
+        raw_outputs = []  # Add this to store raw values
         for i, objective in enumerate(self.objectives):
             logging.info(f"Post-processing objective '{objective.name}' outputs.")
             # Filter cases and their outputs for successful cases only
             successful_cases = [cases[i] for i in successful_cases_indices]
             successful_outputs = all_objective_outputs[i]
+
+            # Store raw outputs before post-processing
+            raw_outputs.append(successful_outputs)
 
             # Execute post-processing
             post_processed_outputs = objective.batch_post_process(
@@ -234,26 +237,37 @@ class Backend(ABC):
             )
             final_outputs.append(post_processed_outputs)
 
-        # Step 4: Save the final objective outputs to case metadata
+        # Step 4: Save both raw and final objective outputs to case metadata
         for case_idx, case in enumerate(successful_cases):
             objective_results = {}
+            raw_objective_results = {}
             for obj_idx, objective in enumerate(self.objectives):
-                # Convert numpy types to Python native types for TOML compatibility
+                # Post-processed value
                 value = final_outputs[obj_idx][case_idx]
-                if hasattr(value, 'item'):  # numpy scalar
+                if hasattr(value, 'item'):
                     value = value.item()
-                elif hasattr(value, 'tolist'):  # numpy array
+                elif hasattr(value, 'tolist'):
                     value = value.tolist()
 
                 objective_results[objective.name] = {
-                    "value": float(value),  # Ensure it's a Python float
+                    "value": float(value),
                     "minimize": objective.minimize,
                 }
 
-            # Save to metadata under "objective-outputs" section
-            case.update_metadata(objective_results, entry_header="objective-outputs")
-            logging.debug(f"Saved objective outputs to metadata for {case.name}")
+                # Raw value (before post-processing)
+                raw_value = raw_outputs[obj_idx][case_idx]
+                if hasattr(raw_value, 'item'):
+                    raw_value = raw_value.item()
+                elif hasattr(raw_value, 'tolist'):
+                    raw_value = raw_value.tolist()
 
+                raw_objective_results[objective.name] = float(raw_value)
+
+            # Save post-processed values
+            case.update_metadata(objective_results, entry_header="objective-outputs")
+            # Save raw values
+            case.update_metadata(raw_objective_results, entry_header="objective-values-raw")
+            logging.debug(f"Saved objective outputs to metadata for {case.name}")
         return final_outputs
 
     def _objective_name_to_objective(
