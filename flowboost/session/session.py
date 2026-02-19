@@ -904,10 +904,11 @@ class Session:
 
             # Raw objective values
             objectives = {}
+            raw_obj_values = metadata.get("objective-values-raw", {})
             if "objective-outputs" in metadata:
                 for obj_name, obj_data in metadata["objective-outputs"].items():
                     objectives[obj_name] = {
-                        "value": obj_data.get("value"),
+                        "value": raw_obj_values.get(obj_name, obj_data.get("value")),
                         "minimize": obj_data.get("minimize"),
                     }
 
