@@ -14,20 +14,19 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-speed           15;
+speed           250;
+angleOfAttack   0; // degs
 
-angleOfAttack   0;
-
-angle           #calc "-degToRad($angleOfAttack)";
-
+#codeBlock
 #codeInclude    "transform.H"
-liftDir         #calc "transform(Ry($angle), vector(0, 0, 1))";
-
-dragDir         #calc "transform(Ry($angle), vector(1, 0, 0))";
+angle           #calc "-degToRad($angleOfAttack)";
+liftDir         #calc "transform(Ry($<scalar>angle), vector(0, 0, 1))";
+dragDir         #calc "transform(Ry($<scalar>angle), vector(1, 0, 0))";
 
 Uinlet          #calc "$speed*$<vector>dragDir";
+#endCodeBlock
 
-dimensions      [ 0 1 -1 0 0 0 0 ];
+dimensions      [0 1 -1 0 0 0 0];
 
 internalField   uniform $Uinlet;
 
@@ -39,11 +38,13 @@ boundaryField
         freestreamValue uniform $Uinlet;
         value           uniform $Uinlet;
     }
+
     wall
     {
         type            noSlip;
     }
-    #includeEtc     "caseDicts/setConstraintTypes"}
 
+    #includeEtc "caseDicts/setConstraintTypes"
+}
 
 // ************************************************************************* //
