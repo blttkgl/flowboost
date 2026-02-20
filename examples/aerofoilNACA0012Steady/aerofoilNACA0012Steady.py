@@ -57,8 +57,8 @@ if __name__ == "__main__":
 
 
     # Define a template case
-    case_dir = Path(data_dir, "templateCase")
-    naca_case = Case.copy(Path("templateCase"), case_dir)
+    case_dir = Path("templateCase")
+    naca_case = Case(case_dir)
 
     decomp_dict = naca_case.dictionary("system/decomposeParDict")
 
@@ -116,9 +116,11 @@ if __name__ == "__main__":
     session.backend.set_search_space([aoa_dim, speed_dim])
 
     # Configure job manager
+    scheduler = "Local"  # Change to "sge" for cluster
+
     if not session.job_manager:
         session.job_manager = Manager.create(
-            scheduler="sge",
+            scheduler=scheduler,
             wdir=session.data_dir,
             job_limit=5
         )
@@ -126,4 +128,5 @@ if __name__ == "__main__":
     session.job_manager.monitoring_interval = 10
     session.backend.initialization_trials = 4
     session.clean_pending_cases()
+    session.submission_script_name = "Allrun_sge" if scheduler.lower() == "sge" else "Allrun_serial"
     session.start()

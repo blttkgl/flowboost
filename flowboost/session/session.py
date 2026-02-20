@@ -81,6 +81,9 @@ class Session:
         self._template_case: Optional[Case] = None
         self._template_case_add_files: Optional[list[str]] = []
 
+        # Optional: override the submission script name for all cases
+        self.submission_script_name: Optional[str] = None
+
         if Path(self.data_dir, config.DEFAULT_CONFIG_NAME).exists():
             # Check if we can restore instead
             logging.info(f"Restoring session ({self.data_dir})")
@@ -234,7 +237,7 @@ class Session:
             new_cases = self.loop_optimizer_once(num_new_cases=free_slots)
 
             for case in new_cases:
-                self.job_manager.submit_case(case)
+                self.job_manager.submit_case(case, script_name=self.submission_script_name)
 
             # Write designs log and print all designs after submitting new cases
             if new_cases:

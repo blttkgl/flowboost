@@ -156,7 +156,7 @@ class Manager(ABC):
     def free_slots(self) -> int:
         return self.job_limit - len(self._get_running_jobs())
 
-    def submit_case(self, case: Case, script_args: dict[str, Any] = {}) -> bool:
+    def submit_case(self, case: Case, script_args: dict[str, Any] = {}, script_name: Optional[str] = None) -> bool:
         """
         Public interface for submitting a Case to the execution environment.
 
@@ -164,6 +164,7 @@ class Manager(ABC):
             case (Case): Case to submit
             script_args (dict[str, Any], optional): Additional arguments to \
                 pass to the Allrun script. Defaults to {}.
+            script_name (Optional[str], optional): Name of the script to submit. Defaults to None.
 
         Raises:
             FileNotFoundError: If Allrun-script is not found
@@ -172,7 +173,7 @@ class Manager(ABC):
         Returns:
             bool: Submission success status
         """
-        script = case.submission_script()
+        script = case.submission_script(script_name=script_name)
         if not script:
             raise FileNotFoundError(f"Allrun script not found: {case}")
 

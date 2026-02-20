@@ -409,12 +409,23 @@ class Case:
 
         return output_mapping
 
-    def submission_script(self, glob_with: str = "Allrun*") -> Optional[Path]:
-        """Finds an Allrun* -named submission script in the case directory.
+    def submission_script(self, glob_with: str = "Allrun*", script_name: Optional[str] = None) -> Optional[Path]:
+        """Finds a submission script in the case directory.
+
+        Args:
+            glob_with (str): Glob pattern to search for. Defaults to "Allrun*".
+            script_name (str, optional): Exact script filename to use instead \
+                of globbing. If provided, glob_with is ignored.
 
         Returns:
-            Optional[Path]: Absolute Path to Allrun* script. None if not found.
+            Optional[Path]: Absolute Path to script. None if not found.
         """
+        if script_name:
+            script_path = self.path / script_name
+            if script_path.exists():
+                return script_path.absolute()
+            return None
+
         script_path = next(self.path.glob(glob_with), None)
         if script_path:
             return Path(script_path).absolute()
