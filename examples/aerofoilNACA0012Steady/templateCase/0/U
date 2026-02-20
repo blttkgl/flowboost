@@ -1,0 +1,49 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  dev
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       volVectorField;
+    location    "0";
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+speed           15;
+
+angleOfAttack   0;
+
+angle           #calc "-degToRad($angleOfAttack)";
+
+#codeInclude    "transform.H"
+liftDir         #calc "transform(Ry($angle), vector(0, 0, 1))";
+
+dragDir         #calc "transform(Ry($angle), vector(1, 0, 0))";
+
+Uinlet          #calc "$speed*$<vector>dragDir";
+
+dimensions      [ 0 1 -1 0 0 0 0 ];
+
+internalField   uniform $Uinlet;
+
+boundaryField
+{
+    freestream
+    {
+        type            freestreamVelocity;
+        freestreamValue uniform $Uinlet;
+        value           uniform $Uinlet;
+    }
+    wall
+    {
+        type            noSlip;
+    }
+    #includeEtc     "caseDicts/setConstraintTypes"}
+
+
+// ************************************************************************* //

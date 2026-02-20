@@ -55,18 +55,28 @@ if __name__ == "__main__":
         max_evaluations=50
     )
 
+
+    # Define a template case
     case_dir = Path(data_dir, "templateCase")
-    naca_case = Case.from_tutorial(
-        "fluid/aerofoilNACA0012Steady",
-        case_dir,
-        method="copy"
-    )
+    naca_case = Case.copy(Path("templateCase"), case_dir)
+
+    decomp_dict = naca_case.dictionary("system/decomposeParDict")
+
+
+
+    # Change the decomposition method
+    decomp_dict = naca_case.dictionary("system/decomposeParDict")
+    decomp_dict.entry("numberOfSubdomains").set(16)
+    decomp_dict.entry("method").set("scotch")
 
     control_dict = naca_case.dictionary("system/controlDict")
     control_dict.entry("writeInterval").set("5000")
 
     U_dict = naca_case.dictionary("0/U")
     U_dict.entry("speed").set("15")
+
+    # Use method="copy" to ensure all files (including speciesThermo) are copied
+    naca_case = Case(case_dir)
 
     # Attach template case to session
     session.attach_template_case(case=naca_case)
@@ -83,27 +93,37 @@ if __name__ == "__main__":
 
     # Define search space dimensions
     DICT_FILE = "0/U"
-
     # Angle of attack dimension
     ENTRY_PATH_AOA = "angleOfAttack"
     entry_link_aoa = Dictionary.link(DICT_FILE).entry(ENTRY_PATH_AOA)
     aoa_dim = Dimension.range(
         name="angleOfAttack",
         link=entry_link_aoa,
-        lower=-10,
-        upper=30,
+        lower=-20,
+        upper=40,
         log_scale=False
     )
-    session.backend.set_search_space([aoa_dim])
+
+    # Speed dimension
+    ENTRY_PATH_AOA = "speed"
+    entry_link_speed = Dictionary.link(DICT_FILE).entry(ENTRY_PATH_AOA)
+    speed_dim = Dimension.choice(
+        name="speed",
+        link=entry_link_speed,
+        choices=[10, 15, 20]
+    )
+
+    session.backend.set_search_space([aoa_dim, speed_dim])
 
     # Configure job manager
     if not session.job_manager:
         session.job_manager = Manager.create(
-            scheduler="Local",
+            scheduler="sge",
             wdir=session.data_dir,
             job_limit=5
         )
 
     session.job_manager.monitoring_interval = 10
+    session.backend.initialization_trials = 4
     session.clean_pending_cases()
     session.start()
