@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
 
     # Define a template case
-    case_dir = Path(data_dir, "aachenBomb_template")
+    case_dir = Path(data_dir, "aerofoilNACA0012Steady_template")
     naca_case = Case.from_tutorial("fluid/aerofoilNACA0012Steady", case_dir, method="copy")
 
     # Set writeInterval to 5000 to avoid writing excessive fields
