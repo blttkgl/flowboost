@@ -1,4 +1,3 @@
-# pylint: disable=import-error
 """
 FlowBoost optimization example for NACA0012 airfoil.
 
@@ -23,7 +22,7 @@ from flowboost.session.session import Session
 warnings.filterwarnings('ignore', category=FutureWarning, module='ax.core.data')
 
 
-def max_lift_objective(case: Case):
+def max_lift_drag_objective(case: Case):
     """
     Calculate the lift coefficient from simulation results.
 
@@ -40,7 +39,9 @@ def max_lift_objective(case: Case):
         return None
 
     last_cl = dataframe.select(pl.last("Cl")).item()
-    return last_cl
+    last_cd = dataframe.select(pl.last("Cd")).item()
+
+    return last_cl/last_cd
 
 
 if __name__ == "__main__":
@@ -57,35 +58,21 @@ if __name__ == "__main__":
 
 
     # Define a template case
-    case_dir = Path("templateCase")
-    naca_case = Case(case_dir)
+    case_dir = Path(data_dir, "aachenBomb_template")
+    naca_case = Case.from_tutorial("fluid/aerofoilNACA0012Steady", case_dir, method="copy")
 
-    decomp_dict = naca_case.dictionary("system/decomposeParDict")
-
-
-
-    # Change the decomposition method
-    decomp_dict = naca_case.dictionary("system/decomposeParDict")
-    decomp_dict.entry("numberOfSubdomains").set(16)
-    decomp_dict.entry("method").set("scotch")
-
+    # Set writeInterval to 5000 to avoid writing excessive fields
     control_dict = naca_case.dictionary("system/controlDict")
     control_dict.entry("writeInterval").set("5000")
-
-    U_dict = naca_case.dictionary("0/U")
-    U_dict.entry("speed").set("15")
-
-    # Use method="copy" to ensure all files (including speciesThermo) are copied
-    naca_case = Case(case_dir)
 
     # Attach template case to session
     session.attach_template_case(case=naca_case)
 
     # Define optimization objective
     objective = Objective(
-        name="Lift",
+        name="L/D",
         minimize=False,
-        objective_function=max_lift_objective,
+        objective_function=max_lift_drag_objective,
         normalization_step="yeo-johnson",
     )
 
@@ -128,5 +115,4 @@ if __name__ == "__main__":
     session.job_manager.monitoring_interval = 10
     session.backend.initialization_trials = 4
     session.clean_pending_cases()
-    session.submission_script_name = "Allrun_sge" if scheduler.lower() == "sge" else "Allrun_serial"
     session.start()

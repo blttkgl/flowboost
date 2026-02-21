@@ -26,15 +26,15 @@ for design in designs:
 
     aoa = params.get("angleOfAttack")
     speed = params.get("speed")
-    lift = objectives.get("Lift", {}).get("value")
+    LD = objectives.get("L/D", {}).get("value")
     gen_index = design.get("generation_index", "0")
 
-    if aoa is not None and speed is not None and lift is not None:
+    if aoa is not None and speed is not None and LD is not None:
         design_data.append({
             "gen_index": gen_index,
             "angleOfAttack": aoa,
             "speed": speed,
-            "lift": lift
+            "L/D": LD
         })
 
 # Sort by numeric generation index
@@ -51,14 +51,14 @@ design_data.sort(key=lambda x: gen_to_float(x["gen_index"]))
 # -----------------------------
 aoas = [d["angleOfAttack"] for d in design_data]
 speeds = [d["speed"] for d in design_data]
-lifts = [d["lift"] for d in design_data]
+LDs = [d["L/D"] for d in design_data]
 
-iterations = list(range(1, len(lifts) + 1))
+iterations = list(range(1, len(LDs) + 1))
 
-# Cumulative best (maximize Lift)
+# Cumulative best (maximize LD)
 cumulative_best = []
-current_best = lifts[0]
-for v in lifts:
+current_best = LDs[0]
+for v in LDs:
     current_best = max(current_best, v)
     cumulative_best.append(current_best)
 
@@ -67,15 +67,15 @@ for v in lifts:
 # -----------------------------
 aoa_min, aoa_max = min(aoas), max(aoas)
 spd_min, spd_max = min(speeds), max(speeds)
-lift_min, lift_max = min(lifts), max(lifts)
+LD_min, LD_max = min(LDs), max(LDs)
 
 aoa_pad = 0.1 * (aoa_max - aoa_min if aoa_max != aoa_min else 1.0)
 spd_pad = 0.1 * (spd_max - spd_min if spd_max != spd_min else 1.0)
-lift_pad = 0.1 * (lift_max - lift_min if lift_max != lift_min else 1.0)
+LD_pad = 0.1 * (LD_max - LD_min if LD_max != LD_min else 1.0)
 
 AOA_LIM = (aoa_min - aoa_pad, aoa_max + aoa_pad)
 SPD_LIM = (spd_min - spd_pad, spd_max + spd_pad)
-LIFT_LIM = (lift_min - lift_pad, lift_max + lift_pad)
+LD_LIM = (LD_min - LD_pad, LD_max + LD_pad)
 
 # -----------------------------
 # Figure & axes
@@ -92,21 +92,21 @@ line2, = ax1.plot([], [], "r-", lw=2, label="Best so far")
 # -----------------------------
 # Top plot formatting
 # -----------------------------
-ax1.set_xlim(0, len(lifts) + 1)
-lmin, lmax = min(lifts), max(lifts)
+ax1.set_xlim(0, len(LDs) + 1)
+lmin, lmax = min(LDs), max(LDs)
 ax1.set_ylim(
     lmin * 1.1 if lmin < 0 else lmin * 0.9,
     lmax * 1.1 if lmax > 0 else lmax * 0.9
 )
 
 ax1.set_xlabel("Iteration")
-ax1.set_ylabel("Lift")
-ax1.set_title("Optimization Progress: Lift vs Iteration")
+ax1.set_ylabel("L/D")
+ax1.set_title("Optimization Progress: LD vs Iteration")
 ax1.legend()
 ax1.grid(alpha=0.3)
 
 # Sobol shading
-num_sobol = min(4, len(lifts))
+num_sobol = min(4, len(LDs))
 ax1.axvspan(0, num_sobol, alpha=0.15, color="green", label="Sobol")
 
 stats_text = ax1.text(
@@ -121,30 +121,30 @@ stats_text = ax1.text(
 # Helper function to draw transparent planes
 # -----------------------------
 def draw_best_planes(ax, aoa_best, speed_best):
-    # Plane at AoA = aoa_best (speed × lift)
-    speed_grid, lift_grid = np.meshgrid(
+    # Plane at AoA = aoa_best (speed × LD)
+    speed_grid, LD_grid = np.meshgrid(
         np.linspace(*SPD_LIM, 20),
-        np.linspace(*LIFT_LIM, 20)
+        np.linspace(*LD_LIM, 20)
     )
     ax.plot_surface(
         np.full_like(speed_grid, aoa_best),
         speed_grid,
-        lift_grid,
+        LD_grid,
         alpha=0.15,
         color="red",
         linewidth=0,
         zorder=0
     )
 
-    # Plane at speed = speed_best (AoA × lift)
-    aoa_grid, lift_grid2 = np.meshgrid(
+    # Plane at speed = speed_best (AoA × LD)
+    aoa_grid, LD_grid2 = np.meshgrid(
         np.linspace(*AOA_LIM, 20),
-        np.linspace(*LIFT_LIM, 20)
+        np.linspace(*LD_LIM, 20)
     )
     ax.plot_surface(
         aoa_grid,
         np.full_like(aoa_grid, speed_best),
-        lift_grid2,
+        LD_grid2,
         alpha=0.15,
         color="blue",
         linewidth=0,
@@ -158,7 +158,7 @@ def animate(frame):
     k = frame + 1
 
     x = iterations[:k]
-    y = lifts[:k]
+    y = LDs[:k]
     best = cumulative_best[:k]
 
     # Update top plot
@@ -173,7 +173,7 @@ def animate(frame):
     ax4.clear()
     ax4.set_xlim(*AOA_LIM)
     ax4.set_ylim(*SPD_LIM)
-    ax4.set_zlim(*LIFT_LIM)
+    ax4.set_zlim(*LD_LIM)
 
     # Draw transparent planes
     draw_best_planes(ax4, aoa_best, speed_best)
@@ -198,20 +198,20 @@ def animate(frame):
         c="red",
         s=150,
         marker="*",
-        label=f"Best Lift: {max(y):.3f}"
+        label=f"Best LD: {max(y):.3f}"
     )
 
     ax4.set_xlabel("Angle of Attack [deg]")
     ax4.set_ylabel("Speed")
-    ax4.set_zlabel("Lift")
-    ax4.set_title("3D Design Space: AoA × Speed × Lift")
+    ax4.set_zlabel("LD")
+    ax4.set_title("3D Design Space: AoA × Speed × LD")
     ax4.legend(loc="upper left")
 
     phase = "Sobol sampling" if k <= num_sobol else "Bayesian Optimization"
     stats_text.set_text(
-        f"Iteration: {k}/{len(lifts)} ({phase})\n"
-        f"Current lift: {y[-1]:.4f}\n"
-        f"Best lift: {best[-1]:.4f}"
+        f"Iteration: {k}/{len(LDs)} ({phase})\n"
+        f"Current LD: {y[-1]:.4f}\n"
+        f"Best LD: {best[-1]:.4f}"
     )
 
     return line1, line2, stats_text
@@ -222,7 +222,7 @@ def animate(frame):
 anim = animation.FuncAnimation(
     fig,
     animate,
-    frames=len(lifts),
+    frames=len(LDs),
     interval=500,
     blit=False
 )
@@ -235,5 +235,5 @@ anim.save("optimization_progress.gif", writer=writer, dpi=150)
 
 plt.savefig("optimization_progress.png", dpi=300, bbox_inches="tight")
 
-print(f"Frames: {len(lifts)}")
-print(f"Final best Lift: {cumulative_best[-1]:.4f}")
+print(f"Frames: {len(LDs)}")
+print(f"Final best LD: {cumulative_best[-1]:.4f}")
