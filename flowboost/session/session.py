@@ -767,11 +767,16 @@ class Session:
                 if not metadata:
                     continue
 
+                # Prefer raw value, fall back to processed
+                raw_values = metadata.get("objective-values-raw", {})
                 obj_outputs = metadata.get("objective-outputs", {})
+
                 if objective.name in obj_outputs:
-                    value = obj_outputs[objective.name].get("value")
+                    value = raw_values.get(
+                        objective.name,
+                        obj_outputs[objective.name].get("value")
+                    )
                     if value is not None:
-                        # Check if target is reached based on minimize/maximize
                         if objective.minimize:
                             target_reached = value <= self.target_value
                         else:
