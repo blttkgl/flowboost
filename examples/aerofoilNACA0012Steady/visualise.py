@@ -5,6 +5,16 @@ import matplotlib.animation as animation
 from matplotlib.animation import PillowWriter
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import numpy as np
+import matplotlib as mpl
+
+mpl.rcParams.update({
+    'font.size': 16,
+    'axes.titlesize': 20,
+    'axes.labelsize': 17,
+    'xtick.labelsize': 15,
+    'ytick.labelsize': 15,
+    'legend.fontsize': 15,
+})
 
 # -----------------------------
 # Load designs data
@@ -80,10 +90,12 @@ LD_LIM = (LD_min - LD_pad, LD_max + LD_pad)
 # -----------------------------
 # Figure & axes
 # -----------------------------
-fig = plt.figure(figsize=(12, 16))
+fig = plt.figure(figsize=(12, 18))
 
 ax1 = fig.add_subplot(3, 1, 1)
 ax4 = fig.add_subplot(3, 1, (2, 3), projection="3d")
+
+plt.subplots_adjust(hspace=0.35)
 
 # Top plot lines
 line1, = ax1.plot([], [], "o-", alpha=0.6, label="Individual runs")
@@ -99,11 +111,12 @@ ax1.set_ylim(
     lmax * 1.1 if lmax > 0 else lmax * 0.9
 )
 
-ax1.set_xlabel("Iteration")
-ax1.set_ylabel("L/D")
-ax1.set_title("Optimization Progress: LD vs Iteration")
-ax1.legend()
+ax1.set_xlabel("Iteration", fontsize=14)
+ax1.set_ylabel("L/D", fontsize=14)
+ax1.set_title("Optimization Progress: LD vs Iteration", fontsize=16)
+ax1.legend(loc="lower right",fontsize=12)
 ax1.grid(alpha=0.3)
+ax1.tick_params(labelsize=12)
 
 # Sobol shading
 num_sobol = min(4, len(LDs))
@@ -113,7 +126,7 @@ stats_text = ax1.text(
     0.02, 0.98, "",
     transform=ax1.transAxes,
     va="top",
-    fontsize=10,
+    fontsize=15,
     bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5)
 )
 
@@ -201,11 +214,12 @@ def animate(frame):
         label=f"Best LD: {max(y):.3f}"
     )
 
-    ax4.set_xlabel("Angle of Attack [deg]")
-    ax4.set_ylabel("Speed")
-    ax4.set_zlabel("LD")
-    ax4.set_title("3D Design Space: AoA × Speed × LD")
-    ax4.legend(loc="upper left")
+    ax4.set_xlabel("Angle of Attack [deg]", fontsize=17, labelpad=12)
+    ax4.set_ylabel("Speed", fontsize=17, labelpad=12)
+    ax4.set_zlabel("LD", fontsize=17, labelpad=12)
+    ax4.set_title("3D Design Space: AoA × Speed × LD", fontsize=20, pad=20)
+    ax4.tick_params(labelsize=15)
+    ax4.legend(loc="upper left", fontsize=14)
 
     phase = "Sobol sampling" if k <= num_sobol else "Bayesian Optimization"
     stats_text.set_text(
